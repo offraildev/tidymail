@@ -1,5 +1,7 @@
+.env
+
 # mac related files
 .DS_Store
 
-
-.env
+# caches
+__pycache__

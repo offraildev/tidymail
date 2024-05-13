@@ -18,10 +18,10 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD")
 
 def login_to_gmail(email: str, app_password: str) -> imaplib.IMAP4_SSL:
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
-        mail.login(email, app_password)
+        connection = imaplib.IMAP4_SSL("imap.gmail.com")
+        connection.login(email, app_password)
         print("Login successful")
-        return mail
+        return connection
     except imaplib.IMAP4.error:
         raise Exception(
             f"Login failed with credentials: email-id: {EMAIL} and application password {APP_PASSWORD}"
@@ -56,10 +56,10 @@ def bodyText_sentFiles(msg):
     return "\n".join(body_texts), ",".join(sent_files)
 
 
-def get_email_meta(email_id_list, mail):
+def get_email_meta(email_id_list, connection):
     meta = []
     for entry in tqdm(email_id_list):
-        status, msg_data = mail.fetch(entry, "(RFC822)")
+        status, msg_data = connection.fetch(entry, "(RFC822)")
         if status == "OK":
             msg = email.message_from_bytes(msg_data[0][1])
             bodyText, sentFiles = bodyText_sentFiles(msg)
@@ -75,15 +75,22 @@ def get_email_meta(email_id_list, mail):
     return meta
 
 
-def mailbox_to_df(email_id_list, mail):
-    emails_meta = get_email_meta(email_id_list, mail)
+def format_date(date):
+    subbed = re.sub(r"\([A-Z]+\)", "", date).strip()
+    try:
+        pattern = "%a, %d %b %Y %H:%M:%S %z"
+        return datetime.strptime(subbed, pattern)
+    except ValueError:
+        pattern = "%a, %d %b %Y %H:%M:%S"
+        return datetime.strptime(" ".join(subbed.split()[:-1]), pattern)
+
+
+def mailbox_to_df(email_id_list, connection):
+    emails_meta = get_email_meta(email_id_list, connection)
     df = pd.DataFrame(emails_meta)
     # convert date to datetime type
-    df["date"] = df["date"].apply(
-        lambda v: datetime.strptime(
-            re.sub(r"\([A-Z]+\)", "", v).strip(), "%a, %d %b %Y %H:%M:%S %z"
-        )
-    )
+
+    df["date"] = df["date"].apply(lambda v: format_date(v))
     return df
 
 
@@ -106,20 +113,20 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
 
-    mail = login_to_gmail(EMAIL, APP_PASSWORD)
-    status, _ = mail.select(args.mailbox)
+    connection = login_to_gmail(EMAIL, APP_PASSWORD)
+    status, _ = connection.select(args.mailbox)
     if status != "OK":
         raise Exception("Mailbox could not be selected")
 
     # get all mails from mailbox folder
-    status, email_ids = mail.search(None, "ALL")
+    status, email_ids = connection.search(None, "ALL")
     if status != "OK":
         raise Exception("Emails from the mailbox folder could not be fetched.")
     email_id_list = email_ids[0].split()
 
-    emails_df = mailbox_to_df(email_id_list, mail)
+    emails_df = mailbox_to_df(email_id_list, connection)
     emails_df.to_csv(args.out_path, index=False)
     print(f"Out file save to path: {args.out_path}")
 
-    mail.close()
-    mail.logout()
+    connection.close()
+    connection.logout()
